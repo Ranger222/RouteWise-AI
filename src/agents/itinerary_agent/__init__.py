@@ -1,0 +1,1 @@
+# MCP Itinerary Agent package initializer

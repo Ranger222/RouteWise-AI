@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+build/
+dist/
+.coverage
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Data / cache / artifacts
+cache/
+data/
+outputs/
+artifacts/
+logs/
+*.sqlite3
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Node / Next.js (web)
+web/node_modules/
+web/.next/
+web/.turbo/
+web/.vercel/
+web/.env
+web/.env.*
+!web/.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Misc
+.tmp/
+.tmp/**
+.tmp_*/

@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --brand: 98 91 246; /* indigo-500 */
+}
+
+@layer base {
+  * { @apply outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/40 focus-visible:ring-offset-2; }
+  body { @apply bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900; }
+}
+
+@layer components {
+  .btn { @apply inline-flex items-center justify-center rounded-xl bg-indigo-600 text-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-indigo-500 active:bg-indigo-600/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors; }
+  .input { @apply w-full rounded-xl border border-slate-300 bg-white/70 px-4 py-2 text-slate-900 placeholder:text-slate-400 shadow-sm focus:border-indigo-400 transition; }
+  .card { @apply rounded-2xl border border-slate-200 bg-white/80 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/70; }
+  .chip { @apply inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs text-slate-700 hover:bg-white shadow-sm transition-colors cursor-pointer; }
+  .bubble-user { @apply bg-indigo-600 text-white; }
+  .bubble-assistant { @apply bg-slate-100 text-slate-800; }
+}
+
+/* Animated hero orb */
+@keyframes floaty {
+  0% { transform: translateY(0px) scale(1); filter: hue-rotate(0deg); }
+  50% { transform: translateY(-10px) scale(1.03); filter: hue-rotate(20deg); }
+  100% { transform: translateY(0px) scale(1); filter: hue-rotate(0deg); }
+}
+
+.orb {
+  background: radial-gradient(circle at 30% 30%, rgba(147, 51, 234, 0.8), rgba(59, 130, 246, 0.8) 40%, rgba(236, 72, 153, 0.6) 70%, transparent 72%);
+  animation: floaty 6s ease-in-out infinite;
+  box-shadow: 0 10px 30px rgba(79, 70, 229, 0.25), inset 0 0 40px rgba(255,255,255,0.25);
+}
+
+/* Subtle fade-in */
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.fade-in { animation: fadeInUp .5s ease both; }
+
+/* Smooth scrolling area */
+.scroll-smooth { scroll-behavior: smooth; }
+
+/* Nicer scrollbar (WebKit) */
+::-webkit-scrollbar { height: 10px; width: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(100,116,139,.35); border-radius: 999px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* --- Enhancements for animated hero orb, transitions, chips, and chat bubbles --- */
+
+/* Smooth page fade-in */
+.fade-in { animation: fadeIn 800ms ease forwards; opacity: 0; }
+@keyframes fadeIn { to { opacity: 1; } }
+
+/* Hero Orb */
+.orb {
+  background: conic-gradient(from 180deg at 50% 50%, #a78bfa, #f472b6, #38bdf8, #a78bfa);
+  box-shadow: 0 8px 30px rgba(99, 102, 241, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+.orb::after {
+  content: "";
+  position: absolute;
+  inset: -30% -30% -30% -30%;
+  background: radial-gradient(60% 60% at 50% 50%, rgba(255,255,255,0.5), rgba(255,255,255,0) 60%);
+  filter: blur(12px);
+  animation: swirl 6s ease-in-out infinite;
+}
+@keyframes swirl { 0%, 100% { transform: rotate(0deg) scale(1); } 50% { transform: rotate(180deg) scale(1.05); } }
+
+/* Input, button, card */
+.input { @apply w-full rounded-lg border border-slate-300 bg-white/80 px-3 py-2 text-slate-800 placeholder-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500 transition dark:bg-slate-800/60 dark:border-slate-700 dark:text-slate-100 dark:placeholder-slate-400; }
+.btn { @apply inline-flex items-center justify-center rounded-lg bg-slate-900 text-white px-4 py-2 text-sm font-medium shadow-sm hover:bg-slate-800 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition dark:bg-indigo-600 dark:hover:bg-indigo-500; }
+.card { @apply rounded-xl border border-slate-200 bg-white/70 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/60; }
+
+/* Chips */
+.chip { @apply rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs text-slate-700 hover:bg-slate-100 shadow-sm transition dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-200 dark:hover:bg-slate-800; }
+
+/* Chat bubbles */
+.bubble-user { @apply bg-indigo-600 text-white; }
+.bubble-assistant { @apply bg-white border border-slate-200 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100; }
+
+/* Smooth scrolling for containers */
+.scroll-smooth { scroll-behavior: smooth; }

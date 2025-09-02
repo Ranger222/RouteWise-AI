@@ -1,0 +1,1 @@
+# MCP Reality Miner Agent package initializer

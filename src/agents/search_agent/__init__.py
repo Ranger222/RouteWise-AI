@@ -1,0 +1,1 @@
+# MCP Search Agent package initializer

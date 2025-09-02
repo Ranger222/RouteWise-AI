@@ -1,0 +1,1 @@
+# MCP Team Lead Agent package initializer
