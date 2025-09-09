@@ -76,7 +76,7 @@ export default function ChatPage() {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 1000 * 120); // 2 min safety timeout
-      const res = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q }), signal: controller.signal });
+      const res = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q, sessionId: targetId }), signal: controller.signal });
       clearTimeout(timeout);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data as any)?.error || "Request failed");

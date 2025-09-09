@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Optional
 from dotenv import load_dotenv
 
 
@@ -8,7 +10,7 @@ from dotenv import load_dotenv
 class Settings:
     gemini_api_key: str
     mistral_api_key: str
-    tavily_api_key: str | None
+    tavily_api_key: Optional[str]
     search_provider: Literal["duckduckgo", "tavily", "hybrid"]
     max_results: int
     request_timeout: int
@@ -18,21 +20,25 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    """Load settings from environment variables with sensible dev defaults.
+    Keeps backward compatibility with existing imports and attributes.
+    """
     load_dotenv()
+
     gemini = os.getenv("GEMINI_API_KEY", "")
     mistral = os.getenv("MISTRAL_API_KEY", "")
     tavily = os.getenv("TAVILY_API_KEY")
-    provider = os.getenv("SEARCH_PROVIDER", "hybrid").lower()
 
-    # Lower conservative defaults; .env can increase if needed
-    max_results = int(os.getenv("MAX_RESULTS", "5"))
+    provider = os.getenv("SEARCH_PROVIDER", "hybrid").lower()
+    if provider not in {"duckduckgo", "tavily", "hybrid"}:
+        provider = "hybrid"
+
+    # Faster defaults for development; can be overridden via .env
+    max_results = int(os.getenv("MAX_RESULTS", "3"))
     request_timeout = int(os.getenv("REQUEST_TIMEOUT", "12"))
     output_dir = os.getenv("OUTPUT_DIR", "src/data/examples")
     cache_dir = os.getenv("CACHE_DIR", "src/data/cache")
     fast_mode = os.getenv("FAST_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
-
-    if provider not in {"duckduckgo", "tavily", "hybrid"}:
-        provider = "hybrid"
 
     if not gemini:
         raise RuntimeError("GEMINI_API_KEY is required. Set it in .env")

@@ -10,9 +10,9 @@ function spawnOnce(cmd: string, args: string[], cwd: string, env: NodeJS.Process
   return spawn(cmd, args, { cwd, env });
 }
 
-async function runPython(query: string): Promise<{ stdout: string; stderr: string; code: number | null }> {
+async function runPython(query: string, opts?: { sessionId?: string; messageType?: string }): Promise<{ stdout: string; stderr: string; code: number | null }> {
   const projectRoot = path.resolve(process.cwd(), ".."); // routewise-ai dir
-  const args = ["-m", "src.main", query, "--no-save"];
+  const args = ["-m", "src.main", query, "--no-save", ...(opts?.sessionId ? ["--session-id", opts.sessionId] : []), ...(opts?.messageType ? ["--message-type", opts.messageType] : [])];
 
   // Choose a single best Python interpreter to avoid multi-attempt timeouts
   let chosen: [string, string[]] | null = null;
@@ -38,10 +38,12 @@ async function runPython(query: string): Promise<{ stdout: string; stderr: strin
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
     ROUTEWISE_MODE: "mcp",
-    MAX_RESULTS: process.env.MAX_RESULTS || "5",
+    MAX_RESULTS: process.env.MAX_RESULTS || "3", // tighten for speed
     REQUEST_TIMEOUT: process.env.REQUEST_TIMEOUT || "12",
     PYTHONIOENCODING: "utf-8",
+    PYTHONUNBUFFERED: "1",
     FAST_MODE: "1",
+    SEARCH_PROVIDER: process.env.SEARCH_PROVIDER || "duckduckgo",
   };
 
   let stdout = "";
@@ -57,12 +59,12 @@ async function runPython(query: string): Promise<{ stdout: string; stderr: strin
     stderr = "";
     code = null;
 
-    // Hard kill after 60s to prevent long hangs
+    // Hard kill after 90s to prevent long hangs
     let timedOut = false;
     const killTimer = setTimeout(() => {
       timedOut = true;
       try { child.kill(); } catch {}
-    }, 1000 * 60);
+    }, 1000 * 90);
 
     const result = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
       child.stdout.on("data", (d) => (stdout += d.toString()));
@@ -70,7 +72,7 @@ async function runPython(query: string): Promise<{ stdout: string; stderr: strin
       child.on("close", (c) => {
         clearTimeout(killTimer);
         if (timedOut) {
-          resolve({ stdout, stderr: stderr + "\n[RouteWise] Planner timed out after 60s.", code: c ?? 124 });
+          resolve({ stdout, stderr: (stderr || "") + "\n[RouteWise] Planner timed out after 90s.", code: c ?? 124 });
         } else {
           resolve({ stdout, stderr, code: c });
         }
@@ -102,6 +104,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const query = (body?.query ?? "").toString().trim();
+    const sessionId = (body?.sessionId ?? "").toString().trim();
     if (!query) return NextResponse.json({ error: "Missing 'query'" }, { status: 400 });
 
     // Quick path for greetings or trivial inputs to avoid long planner runs
@@ -112,7 +115,10 @@ export async function POST(req: Request) {
     }
 
     // Always attempt the real planner first so .env in the Python project is honored
-    const { stdout, stderr, code } = await runPython(query);
+    // Choose message type heuristically for now; frontend may pass an explicit intent later
+    const isRefine = /refine|adjust|change|reduce|increase|why|add|remove|swap/i.test(query);
+    const messageType = isRefine ? "refinement" : "text";
+    const { stdout, stderr, code } = await runPython(query, { sessionId, messageType });
 
     if (code === 0) {
       const marker = "=== Final Itinerary (Markdown) ===";
@@ -123,7 +129,7 @@ export async function POST(req: Request) {
 
     // Fallback: return a lightweight plan so the UI stays responsive, with a hidden debug trailer
     const debug = (stderr || stdout).slice(-800).replace(/`/g, "\u0060");
-    const md = `# Quick Plan\n\nYou asked: **${query}**\n\n> Using a lightweight fallback because the planner failed.\n\n## Day 1\n- Arrive and check in\n- Explore key sights downtown\n- Dinner at a well-reviewed local spot\n\n## Day 2\n- Morning activity aligned to your interests\n- Afternoon stroll/relaxation\n- Optional nightlife or cultural event\n\n<!-- debug: ${debug} -->\n`;
+    const md = `# Quick Plan\n\nYou asked: **${query}**\n\n> Using a lightweight fallback because the planner failed.\n\n## Day 1\n- Arrive and check in\n- Explore key sights downtown\n- Dinner at a well-reviewed local spot\n\n## Day 2\n- Morning activity aligned to your interests\n- Afternoon stroll/relaxation\n- Optional nightlife or cultural event\n\n<!-- debug: ${debug} -->`;
     return NextResponse.json({ markdown: md });
   } catch (e: any) {
     return NextResponse.json({ error: "Server error", details: String(e?.message || e) }, { status: 500 });

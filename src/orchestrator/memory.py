@@ -39,10 +39,20 @@ class TripContext:
     preferences: List[str]
     current_itinerary: Optional[str] = None
     refinements: List[str] = None
+    # Enhanced fields for requirements nesting and context continuity
+    gathered_requirements: List[Dict[str, Any]] = None  # Structured requirements extracted from conversations
+    extracted_insights: List[Dict[str, Any]] = None     # Reality miner insights stored for reference
+    search_context: Dict[str, Any] = None               # Search metadata for re-use in refinements
 
     def __post_init__(self):
         if self.refinements is None:
             self.refinements = []
+        if self.gathered_requirements is None:
+            self.gathered_requirements = []
+        if self.extracted_insights is None:
+            self.extracted_insights = []
+        if self.search_context is None:
+            self.search_context = {}
 
 
 class MemoryManager:
@@ -103,6 +113,49 @@ class MemoryManager:
         
         self.logger.info(f"Created new session: {session_id}")
         return session_id
+
+    def ensure_session_exists(self, session_id: str, initial_query: Optional[str] = None) -> None:
+        """Ensure a session row exists for the given session_id.
+        If it doesn't exist, create it so trip_context updates and message counts persist correctly.
+        """
+        if not session_id:
+            return
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cur = conn.execute("SELECT 1 FROM sessions WHERE session_id = ?", (session_id,))
+                exists = cur.fetchone() is not None
+                if not exists:
+                    # Initialize with empty or minimal context payload
+                    context_payload: Dict[str, Any] = {}
+                    if initial_query:
+                        context_payload = {
+                            "query": initial_query,
+                            "destinations": [],
+                            "duration_days": 0,
+                            "budget_range": "",
+                            "preferences": [],
+                            "current_itinerary": None,
+                            "refinements": [],
+                            "gathered_requirements": [],
+                            "extracted_insights": [],
+                            "search_context": {},
+                        }
+                    conn.execute(
+                        """
+                        INSERT INTO sessions (session_id, created_at, last_updated, trip_context, message_count)
+                        VALUES (?, ?, ?, ?, 0)
+                        """,
+                        (
+                            session_id,
+                            datetime.now().isoformat(),
+                            datetime.now().isoformat(),
+                            json.dumps(context_payload),
+                        ),
+                    )
+                    conn.commit()
+                    self.logger.info(f"Initialized session row for provided id: {session_id}")
+        except Exception as e:
+            self.logger.warning(f"ensure_session_exists failed for {session_id}: {e}")
 
     def add_message(self, session_id: str, role: str, content: str, 
                    message_type: str = "text", metadata: Dict[str, Any] = None) -> None:
