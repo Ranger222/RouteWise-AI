@@ -64,10 +64,9 @@ RouteWise AI is an advanced travel planning system that leverages multi-agent or
 | Document | Description |
 |----------|-------------|
 | [🏗️ Architecture](./docs/ARCHITECTURE.md) | System design, components, and data flow |
-| [🤖 Agent Communication](./docs/AGENT_FLOW.md) | Multi-agent orchestration and workflows |
+| [🤖 Agent Communication](./docs/AGENT_FLOWS.md) | Multi-agent orchestration and workflows |
 | [🔌 API Reference](./docs/API.md) | REST endpoints and integration guide |
 | [🚀 Deployment](./docs/DEPLOYMENT.md) | Production setup and configuration |
-| [🧪 Development](./docs/DEVELOPMENT.md) | Contributing guidelines and local setup |
 
 ## 🏗️ System Architecture
 
