@@ -6,6 +6,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import List, Dict, Any
 from datetime import datetime
+import time
+import os
 
 from src.utils.logger import get_logger
 from src.utils.config import Settings
@@ -290,7 +292,17 @@ class TeamLeadTools:
     def orchestrate_workflow(self, query: str, save: bool = True) -> str:
         """Main workflow orchestration: Search → Mine → Specialized → Synthesize"""
         self.logger.info("Starting MCP workflow: Multi-Search → Mine → Specialized → Synthesize")
-        
+        # Global time budget to ensure we return before the frontend aborts (~120s)
+        # Default to 90s unless overridden via env PLANNER_TIME_BUDGET (min 45, max 100)
+        start_ts = time.perf_counter()
+        try:
+            time_budget = int(os.getenv("PLANNER_TIME_BUDGET", "90"))
+        except Exception:
+            time_budget = 90
+        time_budget = max(45, min(time_budget, 100))
+
+        def remaining() -> float:
+            return time_budget - (time.perf_counter() - start_ts)
         # Trip parameter extraction (early for route detection)
         params = self._extract_trip_params(query)
         is_domestic = self._is_domestic_trip(params)
@@ -319,15 +331,22 @@ class TeamLeadTools:
             # Aggressively cap in fast mode
             search_queries = search_queries[:2]
             self.logger.info(f"FAST_MODE active: limiting search queries to {len(search_queries)}")
+        elif remaining() < 60:
+            # Time-pressure: trim planned searches
+            original_len = len(search_queries)
+            search_queries = search_queries[:4]
+            self.logger.info(f"Time budget: limiting search queries to {len(search_queries)} (from {original_len})")
         all_results = []
         
         for search_query in search_queries:
             self.logger.info(f"Searching via MCP: {search_query}")
             results = self.search_server.search_route(search_query)
             all_results.extend(results)
-
+            if remaining() < 35:
+                self.logger.info("Time budget nearly exhausted after search; breaking early")
+                break
         # Optional nested refinement pass (deeper queries) when not in FAST_MODE
-        if not getattr(self.settings, "fast_mode", False):
+        if (not getattr(self.settings, "fast_mode", False)) and remaining() >= 50:
             try:
                 followups = self._expand_queries_from_results(query, all_results)
                 if followups:
@@ -335,6 +354,9 @@ class TeamLeadTools:
                     for fq in followups:
                         results2 = self.search_server.search_route(fq)
                         all_results.extend(results2)
+                        if remaining() < 38:
+                            self.logger.info("Time budget low during refinement; stopping follow-ups")
+                            break
             except Exception as e:
                 self.logger.debug(f"Refinement pass skipped due to error: {e}")
         
@@ -353,9 +375,21 @@ class TeamLeadTools:
             self.logger.info(f"FAST_MODE active: limiting docs to {len(docs)} for mining")
         else:
             self.logger.info(f"Total unique documents collected: {len(docs)}")
+        
+        # Time-pressure trimming of docs
+        if remaining() < 25:
+            docs = docs[:2]
+            self.logger.info("Time budget: limiting docs to 2 for mining")
+        elif remaining() < 40:
+            docs = docs[:4]
+            self.logger.info("Time budget: limiting docs to 4 for mining")
 
         # Extract insights via Reality Miner MCP
-        insights = self.miner_server.extract(query, docs)
+        if remaining() < 22:
+            self.logger.info("Time budget: skipping mining; proceeding with minimal insights")
+            insights = []
+        else:
+            insights = self.miner_server.extract(query, docs)
         
         # In fast mode, keep fewer insights into itinerary to shorten prompt
         if getattr(self.settings, "fast_mode", False):
@@ -363,7 +397,22 @@ class TeamLeadTools:
             self.logger.info(f"FAST_MODE active: limiting insights passed to itinerary to {len(insights)}")
         
         # Generate itinerary via Itinerary MCP
-        itinerary = self.itinerary_server.build_itinerary(query, insights)
+        if remaining() < 14:
+            self.logger.info("Time budget: using quick inline itinerary fallback")
+            header_bits = []
+            if params.get("origin_city") and params.get("destination_city"):
+                header_bits.append(f"Your Trip: {params['origin_city']} → {params['destination_city']}")
+            quick = ("\n".join(header_bits) + ("\n\n" if header_bits else "")) + (
+                "Quick Plan (compact):\n"
+                "- Start with 2–3 must‑do highlights and one standout food spot.\n"
+                "- Getting around: use metro/bus; rideshare for late nights; keep small cash.\n"
+                "- Heads‑up: verify timings/prices on official sites; keep an eye on scams around stations.\n"
+                "- Next steps: tell me dates, trip length, budget vibe — I’ll flesh out a day‑by‑day in seconds."
+            )
+            itinerary = type("Itin", (), {})()
+            itinerary.markdown = quick
+        else:
+            itinerary = self.itinerary_server.build_itinerary(query, insights)
 
         # Build a condensed "Reality Check" section from mined insights (scams, warnings, challenges)
         reality_md = ""
@@ -392,8 +441,7 @@ class TeamLeadTools:
         checklist_md = ""
         budget_md = ""
         wants_flights = any(w in (query or "").lower() for w in ["flight", "flights", "air", "plane"])  # explicit flight ask
-
-        if wants_flights:
+        if wants_flights and remaining() >= 20:
             try:
                 flights_md = self.flight_server.suggest_flights(params)
             except Exception as e:
@@ -402,7 +450,7 @@ class TeamLeadTools:
 
         # Include visa only for international trips AND when the user asks about visa/documents
         wants_visa = (not is_domestic) and any(w in (query or "").lower() for w in ["visa", "passport", "documents", "immigration"])
-        if wants_visa:
+        if wants_visa and remaining() >= 18:
             try:
                 visa_md = self.visa_server.synthesize_guidance(params)
             except Exception as e:
@@ -411,7 +459,7 @@ class TeamLeadTools:
 
         # Checklist - only include if first-time or explicitly asked
         wants_checklist = bool(params.get("is_first_time")) or any(w in (query or "").lower() for w in ["checklist", "packing", "pack", "what to bring"])
-        if wants_checklist:
+        if wants_checklist and remaining() >= 16:
             try:
                 checklist_params = params.copy()
                 checklist_params["is_domestic"] = is_domestic
@@ -427,7 +475,7 @@ class TeamLeadTools:
 
         # Budget estimation (optional; include only if asked or duration is known)
         wants_budget = (isinstance(duration_days, int) and duration_days > 0) or any(k in (query or "").lower() for k in ["budget", "cost", "price", "expenses", "how much", "per day", "per-day"])
-        if wants_budget:
+        if wants_budget and remaining() >= 18:
             try:
                 # Pass domestic flag and derived duration to budget agent
                 budget_params = params.copy()
@@ -477,7 +525,7 @@ class TeamLeadTools:
         final = "\n\n".join(([header] if header else []) + sections)
 
         # Skip saving artifacts in fast mode to reduce I/O
-        if save and not getattr(self.settings, "fast_mode", False):
+        if save and not getattr(self.settings, "fast_mode", False) and remaining() >= 12:
             self._save_outputs(query, deduped, insights, final)
         
         return final

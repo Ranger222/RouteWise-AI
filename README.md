@@ -46,18 +46,41 @@ RouteWise AI is an advanced travel planning system that leverages multi-agent or
    # Edit .env with your API keys
    ```
 
-4. **Test the CLI**
-   ```bash
-   python -m src.main "Delhi to Jaipur, 3 days, budget travel"
-   ```
+4. **Start the Python backend (persistent server)**
+   - macOS/Linux (from repo root after step 2 already cd'ed into routewise-ai):
+     ```bash
+     python -m uvicorn src.api.server:app --reload --port 8000
+     ```
+   - Windows (PowerShell):
+     ```powershell
+     .venv\Scripts\activate
+     python -m uvicorn src.api.server:app --reload --port 8000
+     ```
+   The backend exposes:
+   - Health: http://127.0.0.1:8000/health
+   - Planning endpoint: http://127.0.0.1:8000/plan
 
-5. **Start the web interface**
+5. **Start the web interface** (in a second terminal)
    ```bash
    cd web
    npm install
+   # Optional: if your backend runs on a different host/port, set PY_BACKEND_URL accordingly
+   # macOS/Linux:
+   export PY_BACKEND_URL="http://127.0.0.1:8000/plan"
+   # Windows (PowerShell):
+   # setx PY_BACKEND_URL "http://127.0.0.1:8000/plan"   # persists for new terminals
+   #   or for current session only:
+   # $env:PY_BACKEND_URL = "http://127.0.0.1:8000/plan"
    npm run dev
    ```
-   Open [http://localhost:3000](http://localhost:3000) in your browser.
+   Then open [http://localhost:3000](http://localhost:3000) in your browser.
+
+   Tip: You can also run both servers together using the helper script from the repo root:
+   ```bash
+   ./start.sh              # requires Bash (macOS/Linux or Git Bash/WSL on Windows)
+   ./start.sh --backend-only
+   ./start.sh --frontend-only
+   ```
 
 ## 📖 Documentation
 
@@ -133,7 +156,16 @@ python -m src.clients.cli_client
 - 💾 **Session Memory**: Persistent conversation history
 - 📋 **Export Options**: Save itineraries as PDF/Markdown
 
-## 🔧 Configuration
+### Configuration
+
+Add these environment variables to control performance and behavior:
+
+- FAST_MODE: set to "1" (or "true") to enable fast development mode. In fast mode, the system caps initial search queries, trims mined documents, skips deep refinement, and limits insights to keep responses snappy.
+- PLANNER_TIME_BUDGET: total seconds budget for a full planning request (default ~90s, clamped to ~45–100s). The system uses remaining time checks to gate deeper work, optionally falling back to a quick inline itinerary and skipping artifact saves when time is nearly exhausted.
+
+Notes:
+- The Next.js dev API route sets FAST_MODE=1 by default for responsiveness during development.
+- For production, tune PLANNER_TIME_BUDGET appropriately and disable FAST_MODE unless desired.
 
 ### Environment Variables
 

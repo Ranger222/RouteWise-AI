@@ -740,3 +740,20 @@ def test_search_only(client):
   <br>
   <sub>Intelligent travel planning through powerful APIs</sub>
 </div>
+
+## ⏱️ Performance Controls
+
+The API behavior is influenced by server-side environment variables that control time budgeting and fast-path execution:
+
+- FAST_MODE ("1"/"true"): Enables a development-fast path that caps initial search queries, trims mined documents, skips deep refinement, and limits insights to improve responsiveness.
+- PLANNER_TIME_BUDGET (seconds): Total time budget for the planning workflow (default ~90s, clamped to ~45–100s). The server uses remaining-time checks to gate deeper work, potentially falling back to a quick inline itinerary and skipping artifact saving when nearly out of time.
+
+Notes:
+- These settings are applied on the server; no request parameters are required.
+- The web dev API route sets FAST_MODE=1 by default to keep responses snappy during development.
+
+### Impact on /plan
+
+- Under tight budgets, the response may contain a simplified itinerary (quick inline fallback) rather than a fully detailed plan if remaining time is low.
+- Specialized submodules (flights, visa, checklist, budget) may be conditionally skipped when insufficient time remains.
+- Result artifacts may not be persisted if the server determines there is insufficient remaining time.

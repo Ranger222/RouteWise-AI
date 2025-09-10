@@ -581,3 +581,52 @@ class AgentHealthMonitor:
   <br>
   <sub>Building the future of collaborative AI systems</sub>
 </div>
+
+## ⏱️ Time-Budgeted Execution
+
+The Team Lead Agent now enforces a time budget per request and a fast mode for development to keep responses snappy:
+
+- Fast Mode (FAST_MODE=1):
+  - Caps initial search queries to the top 3-4 based on salience
+  - Skips nested refinement search passes
+  - Trims mined documents before insight extraction
+  - Limits the number of insights passed downstream
+- Planner Time Budget (PLANNER_TIME_BUDGET, default 90s, clamped 45–100s):
+  - Remaining-time checks gate deeper work
+  - Quick inline itinerary fallback when remaining time is low
+  - Specialized agents (flights, visa, checklist, budget) only run if enough time remains
+  - Saving artifacts is skipped if time is nearly exhausted
+
+High-level flow under time pressure:
+
+```mermaid
+sequenceDiagram
+    participant TL as Team Lead
+    participant Search as Search Agent
+    participant Miner as Reality Miner
+    participant Plan as Itinerary Agent
+
+    TL->>TL: compute remaining()
+    alt FAST_MODE
+      TL->>Search: limited queries (top 3-4)
+    else Normal
+      TL->>Search: full queries (+ optional refinement if time permits)
+    end
+
+    Search-->>TL: results
+    TL->>Miner: extract insights (trimmed when under pressure)
+    Miner-->>TL: insights
+
+    alt low remaining time
+      TL->>TL: quick inline itinerary fallback
+    else
+      TL->>Plan: generate detailed itinerary
+    end
+
+    TL->>TL: optionally run flights/visa/checklist/budget if remaining() >= threshold
+    TL->>TL: save artifacts only if remaining() >= threshold
+```
+
+Notes:
+- Frontend dev route sets FAST_MODE=1 by default for responsiveness.
+- Time thresholds are conservative to keep requests within the global budget.

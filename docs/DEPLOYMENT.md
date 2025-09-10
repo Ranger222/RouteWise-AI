@@ -1143,3 +1143,20 @@ redis-cli monitor
   <br>
   <sub>Production-ready deployment for RouteWise AI</sub>
 </div>
+
+## ⏱️ Time & Performance Environment Variables
+
+The planning orchestration supports time-aware behavior controlled by environment variables:
+
+- FAST_MODE ("1"/"true"): Enables a development-fast path that caps initial search queries, trims mined documents, skips deep refinement, and limits insights for faster iteration.
+  - Recommended: Enable in local development to reduce turnaround time.
+  - Production: Disable unless you explicitly want faster-but-slimmer outputs.
+
+- PLANNER_TIME_BUDGET (seconds): Total time budget for the planning workflow.
+  - Default: ~90s (clamped internally to ~45–100s).
+  - Behavior: The system performs remaining-time checks to gate deeper steps, may fall back to a quick inline itinerary, skip specialized submodules (flights/visa/budget/checklist), and avoid saving artifacts if nearly out of time.
+  - Production: Tune based on throughput and latency SLOs. Longer budgets yield more thorough plans at the cost of higher latency.
+
+Notes:
+- The Next.js dev API route sets FAST_MODE=1 by default for a snappier DX.
+- No API request parameter is required; these are server-side controls.

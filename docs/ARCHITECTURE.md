@@ -484,3 +484,54 @@ timeline
   <br>
   <sub>Enabling the next generation of travel planning</sub>
 </div>
+
+## ⏱️ Time & Performance Controls
+
+The orchestration layer enforces time-aware behavior to ensure predictable latencies and graceful degradation.
+
+- Fast Mode
+  - Env: FAST_MODE=1 enables development-fast path
+  - Effects:
+    - Caps initial web search queries to top 3-4
+    - Skips deep refinement passes when time is low
+    - Trims mined documents before LLM analysis
+    - Limits insight count forwarded to specialized agents
+- Planner Time Budget
+  - Env: PLANNER_TIME_BUDGET (default ~90s, clamped to ~45–100s)
+  - Mechanics:
+    - A remaining() function tracks elapsed vs. total budget
+    - Gates: refinement search, insight mining, itinerary detail level
+    - Fallback: quick inline itinerary when low on time
+    - Specialized agents (flights, visa, checklist, budget) run only if remaining time ≥ thresholds
+    - Saving artifacts is skipped when remaining time is nearly exhausted
+
+Sequence under budget pressure:
+
+```mermaid
+sequenceDiagram
+    participant TL as Team Lead
+    participant Search
+    participant Miner
+    participant Plan
+
+    TL->>TL: remaining() = budget - elapsed
+    TL->>Search: limited queries (FAST_MODE)
+    Search-->>TL: results
+
+    TL->>Miner: extract insights (trimmed)
+    Miner-->>TL: insights
+
+    alt low remaining
+      TL->>TL: quick inline itinerary fallback
+    else
+      TL->>Plan: generate detailed itinerary
+    end
+
+    TL->>TL: conditionally run flights/visa/checklist/budget
+    TL->>TL: conditionally save artifacts
+```
+
+Operational notes:
+- Frontend dev route (web/src/app/api/plan/route.ts) sets FAST_MODE=1 to keep plan generation responsive during development.
+- Apply production-appropriate budgets and disable FAST_MODE in production unless desired.
+- Keep thresholds conservative to avoid timeouts across providers and network variance.
