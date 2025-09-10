@@ -84,7 +84,10 @@ export default function ChatPage() {
       const assistantMsg: Message = { id: uid(), role: "assistant", content: content || "I couldn’t generate an itinerary. Please try refining your request.", createdAt: Date.now() };
       setChats((prev) => prev.map((c) => c.id === targetId ? { ...c, messages: [...c.messages, assistantMsg], updatedAt: Date.now() } : c));
     } catch (err: any) {
-      setError(err?.message || String(err));
+      const msg = err?.name === "AbortError" || String(err).toLowerCase().includes("aborted")
+        ? "Request timed out. The planner took too long to respond. Please try again, refine your query, or try a simpler request."
+        : (err?.message || String(err));
+      setError(msg);
     } finally {
       setLoading(false);
     }

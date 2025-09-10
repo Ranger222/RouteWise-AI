@@ -10,6 +10,33 @@ function spawnOnce(cmd: string, args: string[], cwd: string, env: NodeJS.Process
   return spawn(cmd, args, { cwd, env });
 }
 
+async function callPythonServer(query: string, opts?: { sessionId?: string; messageType?: string }): Promise<{ ok: boolean; markdown?: string; error?: string }> {
+  // Ensure we always POST to /plan even if PY_BACKEND_URL is just the origin
+  const base = process.env.PY_BACKEND_URL || "http://127.0.0.1:8000";
+  const url = `${base.replace(/\/+$/, "")}/plan`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1000 * 110); // 110s budget; leave 10s buffer for frontend
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query, sessionId: opts?.sessionId, messageType: opts?.messageType }),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { markdown?: string };
+    const markdown = (data?.markdown || "").toString();
+    if (!markdown) throw new Error("Empty markdown from Python server");
+    return { ok: true, markdown };
+  } catch (e: any) {
+    const isAborted = e?.name === "AbortError" || String(e).includes("aborted");
+    const errorMsg = isAborted ? "Python backend timed out (>110s)" : String(e?.message || e);
+    return { ok: false, error: errorMsg };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function runPython(query: string, opts?: { sessionId?: string; messageType?: string }): Promise<{ stdout: string; stderr: string; code: number | null }> {
   const projectRoot = path.resolve(process.cwd(), ".."); // routewise-ai dir
   const args = ["-m", "src.main", query, "--no-save", ...(opts?.sessionId ? ["--session-id", opts.sessionId] : []), ...(opts?.messageType ? ["--message-type", opts.messageType] : [])];
@@ -114,10 +141,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ markdown: md });
     }
 
-    // Always attempt the real planner first so .env in the Python project is honored
     // Choose message type heuristically for now; frontend may pass an explicit intent later
     const isRefine = /refine|adjust|change|reduce|increase|why|add|remove|swap/i.test(query);
     const messageType = isRefine ? "refinement" : "text";
+
+    // 1) Try persistent Python backend first
+    const pythonServer = await callPythonServer(query, { sessionId, messageType });
+    if (pythonServer.ok && pythonServer.markdown) {
+      return NextResponse.json({ markdown: pythonServer.markdown });
+    }
+
+    // If the Python server timed out, return a quick fallback immediately to stay within client timeout
+    if (!pythonServer.ok && (pythonServer.error || '').toLowerCase().includes('timed out')) {
+      const debug = (pythonServer.error || '').slice(-800).replace(/`/g, "\u0060");
+      const md = `# Quick Plan\n\nYou asked: **${query}**\n\n> The backend is busy and timed out. Showing a lightweight plan; please try again or refine your query.\n\n## Day 1\n- Arrive and check in\n- Explore key sights downtown\n- Dinner at a well-reviewed local spot\n\n## Day 2\n- Morning activity aligned to your interests\n- Afternoon stroll/relaxation\n- Optional nightlife or cultural event\n\n<!-- debug: ${debug} -->`;
+      return NextResponse.json({ markdown: md });
+    }
+
+    // 2) Fallback to spawning the CLI once to keep current behavior working
     const { stdout, stderr, code } = await runPython(query, { sessionId, messageType });
 
     if (code === 0) {
@@ -128,7 +169,7 @@ export async function POST(req: Request) {
     }
 
     // Fallback: return a lightweight plan so the UI stays responsive, with a hidden debug trailer
-    const debug = (stderr || stdout).slice(-800).replace(/`/g, "\u0060");
+    const debug = ((pythonServer.error || "") + "\n" + (stderr || stdout)).slice(-800).replace(/`/g, "\u0060");
     const md = `# Quick Plan\n\nYou asked: **${query}**\n\n> Using a lightweight fallback because the planner failed.\n\n## Day 1\n- Arrive and check in\n- Explore key sights downtown\n- Dinner at a well-reviewed local spot\n\n## Day 2\n- Morning activity aligned to your interests\n- Afternoon stroll/relaxation\n- Optional nightlife or cultural event\n\n<!-- debug: ${debug} -->`;
     return NextResponse.json({ markdown: md });
   } catch (e: any) {
