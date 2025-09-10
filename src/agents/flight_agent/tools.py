@@ -36,6 +36,8 @@ class FlightTools:
             f"Origin: {origin}\nDestination: {dest}\nDepart: {d1}\nReturn: {d2}\n"
             "User prefers budget-friendly and reliable options when possible."
         )
+        # Remove generic boilerplate: only include concise, context-aware content
+        used_fallback = False
         try:
             resp = self.client.chat.complete(
                 model="mistral-large-latest",
@@ -51,16 +53,12 @@ class FlightTools:
                 text = getattr(resp, "output_text", "") or ""
         except Exception as e:
             self.logger.warning(f"Mistral flight suggest failed: {e}")
+            used_fallback = True
+            # Tighter fallback without verbose generic tips
             text = (
-                "- Search Google Flights/Skyscanner with flexible dates.\n"
-                "- Compare 1-stop options via common hubs; longer layovers can be cheaper.\n"
-                "- Avoid tight layovers (<2h) on outbound."
+                "- Check Google Flights or Skyscanner; compare 1-stop options.\n"
+                "- Avoid tight layovers (<2h) on outbound; verify baggage rules."
             )
 
-        extra = (
-            "\nTips:\n"
-            "- Use flexible date grid and set price alerts.\n"
-            "- Check baggage fees; some low fares exclude a carry-on.\n"
-            "- Verify airport: some cities have multiple (e.g., JFK/EWR/LGA)."
-        )
-        return text.strip() + "\n" + extra
+        # Do not append static boilerplate; keep response lean
+        return (text or "").strip()

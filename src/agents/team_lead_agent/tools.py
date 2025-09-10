@@ -50,33 +50,162 @@ class TeamLeadTools:
         (out_dir / f"{key}.md").write_text(itinerary_md, encoding="utf-8")
 
     def _generate_search_queries(self, query: str) -> List[str]:
-        """Generate reality-focused search queries that prioritize real traveller experiences, challenges, and scams."""
+        """Generate context-aware, reality-focused search queries via LLM (no hardcoding).
+        Falls back to a reasonable static set if LLM generation fails.
+        """
         q = (query or "").strip()
-        base = [
-            q,
-            f"{q} reddit experiences tips",
-            f"{q} site:reddit.com travel advice problems",
-            f"{q} site:tripadvisor.com/ShowTopic forum issues scams",
-            f"{q} site:travel.stackexchange.com safety visas transport",
-            f"{q} blog personal experience what to avoid",
-        ]
-        reality = [
-            f"{q} common scams to avoid taxi rickshaw overcharge",
-            f"{q} safety at night solo women experiences",
-            f"{q} pickpocket areas crowded warnings",
-            f"{q} local transport hacks train bus metro delays",
-            f"{q} bad experiences what went wrong lessons learned",
-            f"{q} monsoon rain closures strikes disruptions",
-        ]
-        practicals = [
-            f"{q} airport to city transport real cost avoid scams",
-            f"{q} neighborhoods to avoid where to stay reddit",
-            f"{q} hostel vs hotel area to stay budget",
-            f"{q} best time to visit avoid crowds heat rain",
-            f"{q} food hygiene street food safety upset stomach",
-        ]
-        queries = base + reality + practicals
+        # LLM-directed query planner prompt
+        system = (
+            "You are an expert travel search planner. Given a user's intent, generate 10-15 focused web "
+            "search queries that emphasize REAL traveller experiences, seasonal issues (like Diwali festivals), "
+            "ground realities (scams, delays, surge pricing), and forum discussions. \n"
+            "Guidelines: \n"
+            "- Prioritize sources like reddit, tripadvisor forums, travel.stackexchange, local news, and blogs. \n"
+            "- Include seasonal/festival-specific angles when applicable (e.g., Diwali/Christmas/Holi causing surge pricing, traffic, delays). \n"
+            "- Mix general queries and site-scoped ones (e.g., site:reddit.com, site:tripadvisor.com/ShowTopic). \n"
+            "- Focus on: transport safety, bus/train/flight price surges, crowd control, closures, scams, and first-hand experiences. \n"
+            "- Return STRICT JSON array of strings (no extra text)."
+        )
+        user = (
+            f"User Query: {q}\n\n"
+            "Return a JSON array of 10-15 search queries tailored to this intent."
+        )
+
+        queries: List[str] = []
+        try:
+            resp = self.mistral.chat.complete(
+                model="mistral-large-latest",
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=0.0,
+            )
+            content = ""
+            try:
+                content = resp.choices[0].message.content  # type: ignore[attr-defined]
+            except Exception:
+                content = getattr(resp, "output_text", "") or str(resp)
+            try:
+                data = json.loads(content)
+                if isinstance(data, list):
+                    # keep strings only
+                    queries = [str(x).strip() for x in data if isinstance(x, (str, int, float))]
+            except Exception:
+                # Best-effort recovery
+                start = content.find("[")
+                end = content.rfind("]")
+                payload = content[start:end+1] if start != -1 and end != -1 else "[]"
+                try:
+                    from json_repair import repair_json
+                    data = json.loads(repair_json(payload))
+                    if isinstance(data, list):
+                        queries = [str(x).strip() for x in data if isinstance(x, (str, int, float))]
+                except Exception:
+                    queries = []
+        except Exception as e:
+            self.logger.warning(f"LLM query planning failed: {e}")
+            queries = []
+
+        if not queries:
+            # Fallback to legacy heuristic set to avoid total failure
+            base = [
+                q,
+                f"{q} reddit experiences tips",
+                f"{q} site:reddit.com travel advice problems",
+                f"{q} site:tripadvisor.com/ShowTopic forum issues scams",
+                f"{q} site:travel.stackexchange.com safety visas transport",
+                f"{q} blog personal experience what to avoid",
+            ]
+            reality = [
+                f"{q} common scams to avoid taxi rickshaw overcharge",
+                f"{q} safety at night solo women experiences",
+                f"{q} pickpocket areas crowded warnings",
+                f"{q} local transport hacks train bus metro delays",
+                f"{q} bad experiences what went wrong lessons learned",
+                f"{q} festival crowd traffic surge pricing",
+            ]
+            practicals = [
+                f"{q} airport to city transport real cost avoid scams",
+                f"{q} neighborhoods to avoid where to stay reddit",
+                f"{q} hostel vs hotel area to stay budget",
+                f"{q} best time to visit avoid crowds heat rain",
+                f"{q} food hygiene street food safety upset stomach",
+            ]
+            queries = base + reality + practicals
+        
+        # Cap in FAST_MODE
+        if getattr(self.settings, "fast_mode", False):
+            queries = queries[:4]
+        else:
+            queries = queries[:15]
+        
         return queries
+
+    def _expand_queries_from_results(self, original_query: str, results: List[Any]) -> List[str]:
+        """Generate deeper, nested queries based on early results (titles/snippets)."""
+        # Build compact context from top results
+        items = []
+        for r in results[:6]:
+            try:
+                title = getattr(r, 'title', '') or r.get('title', '')  # type: ignore[attr-defined]
+                snippet = getattr(r, 'snippet', '') or r.get('snippet', '')  # type: ignore[attr-defined]
+                url = getattr(r, 'url', '') or r.get('url', '')  # type: ignore[attr-defined]
+                if title or snippet:
+                    items.append(f"TITLE: {title}\nSNIPPET: {snippet}\nURL: {url}")
+            except Exception:
+                continue
+        context = "\n\n".join(items)[:4000]
+        if not context:
+            return []
+
+        system = (
+            "You are a search refiner. Given a user intent and some early search results, propose 5-8 follow-up "
+            "queries that go DEEPER into reality-first angles: seasonal problems (e.g., Diwali travel issues), price surges, "
+            "route-specific challenges (origin/destination), scams, on-ground logistics, and first-hand reports. "
+            "Favor site-scoped queries (reddit, tripadvisor forums, travel.stackexchange) and local news/blogs. "
+            "Return STRICT JSON array of strings only."
+        )
+        user = (
+            f"User Query: {original_query}\n\nEarly Results Context:\n{context}\n\n"
+            "Return a JSON array of 5-8 refined queries."
+        )
+        followups: List[str] = []
+        try:
+            resp = self.mistral.chat.complete(
+                model="mistral-large-latest",
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                temperature=0.0,
+            )
+            content = ""
+            try:
+                content = resp.choices[0].message.content  # type: ignore[attr-defined]
+            except Exception:
+                content = getattr(resp, "output_text", "") or str(resp)
+            try:
+                data = json.loads(content)
+                if isinstance(data, list):
+                    followups = [str(x).strip() for x in data if isinstance(x, (str, int, float))]
+            except Exception:
+                start = content.find("[")
+                end = content.rfind("]")
+                payload = content[start:end+1] if start != -1 and end != -1 else "[]"
+                try:
+                    from json_repair import repair_json
+                    data = json.loads(repair_json(payload))
+                    if isinstance(data, list):
+                        followups = [str(x).strip() for x in data if isinstance(x, (str, int, float))]
+                except Exception:
+                    followups = []
+        except Exception as e:
+            self.logger.debug(f"Follow-up query refinement failed: {e}")
+            followups = []
+
+        # Cap number of follow-ups
+        return (followups or [])[:6]
 
     def _extract_trip_params(self, query: str) -> Dict[str, Any]:
         """Use Mistral to extract trip parameters from the user's query.
@@ -159,7 +288,7 @@ class TeamLeadTools:
         return (origin_in_india and dest_in_india) or explicit_domestic
 
     def orchestrate_workflow(self, query: str, save: bool = True) -> str:
-        """Main workflow orchestration: Search → Mine → Specialized Agents → Synthesize"""
+        """Main workflow orchestration: Search → Mine → Specialized → Synthesize"""
         self.logger.info("Starting MCP workflow: Multi-Search → Mine → Specialized → Synthesize")
         
         # Trip parameter extraction (early for route detection)
@@ -184,7 +313,7 @@ class TeamLeadTools:
             except Exception:
                 duration_days = None
 
-        # Multi-query search strategy for comprehensive data collection
+        # Multi-query search strategy for comprehensive data collection (LLM-planned)
         search_queries = self._generate_search_queries(query)
         if getattr(self.settings, "fast_mode", False):
             # Aggressively cap in fast mode
@@ -196,6 +325,18 @@ class TeamLeadTools:
             self.logger.info(f"Searching via MCP: {search_query}")
             results = self.search_server.search_route(search_query)
             all_results.extend(results)
+
+        # Optional nested refinement pass (deeper queries) when not in FAST_MODE
+        if not getattr(self.settings, "fast_mode", False):
+            try:
+                followups = self._expand_queries_from_results(query, all_results)
+                if followups:
+                    self.logger.info(f"Refinement: executing {len(followups)} follow-up queries")
+                    for fq in followups:
+                        results2 = self.search_server.search_route(fq)
+                        all_results.extend(results2)
+            except Exception as e:
+                self.logger.debug(f"Refinement pass skipped due to error: {e}")
         
         # Deduplicate by URL across all searches
         seen = set()
