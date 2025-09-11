@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 import re
+import os
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -25,6 +26,7 @@ class PlanRequest(BaseModel):
   query: str
   sessionId: Optional[str] = None
   messageType: Optional[str] = "text"  # 'text' | 'refinement'
+  fastMode: Optional[bool] = None  # optional per-request override
 
 
 class PlanResponse(BaseModel):
@@ -61,7 +63,12 @@ def plan(req: PlanRequest):
     except Exception as e:
       logger.warning(f"memory reply failed, falling back to router: {e}")
 
+  # Optional per-request FAST_MODE override (best-effort, restored after call)
+  prev_fast = os.environ.get("FAST_MODE")
   try:
+    if req.fastMode is not None:
+      os.environ["FAST_MODE"] = "1" if req.fastMode else "0"
+
     md = router.route(
       q,
       save=False,  # do not write artifacts on server by default
@@ -73,6 +80,13 @@ def plan(req: PlanRequest):
   except Exception as e:
     logger.error(f"planner error: {e}")
     raise HTTPException(status_code=500, detail="Planner failed")
+  finally:
+    # Restore previous FAST_MODE env to avoid affecting other requests
+    if req.fastMode is not None:
+      if prev_fast is None:
+        os.environ.pop("FAST_MODE", None)
+      else:
+        os.environ["FAST_MODE"] = prev_fast
 
 
 # ---- helpers (small duplication from CLI entry for web) ----

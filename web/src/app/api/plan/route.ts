@@ -6,11 +6,13 @@ import fs from "node:fs";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type PlanOpts = { sessionId?: string; messageType?: string; fastMode?: boolean };
+
 function spawnOnce(cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv) {
   return spawn(cmd, args, { cwd, env });
 }
 
-async function callPythonServer(query: string, opts?: { sessionId?: string; messageType?: string }): Promise<{ ok: boolean; markdown?: string; error?: string }> {
+async function callPythonServer(query: string, opts?: PlanOpts): Promise<{ ok: boolean; markdown?: string; error?: string }> {
   // Ensure we always POST to /plan even if PY_BACKEND_URL is just the origin
   const base = process.env.PY_BACKEND_URL || "http://127.0.0.1:8000";
   const url = `${base.replace(/\/+$/, "")}/plan`;
@@ -20,7 +22,7 @@ async function callPythonServer(query: string, opts?: { sessionId?: string; mess
     const res = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query, sessionId: opts?.sessionId, messageType: opts?.messageType }),
+      body: JSON.stringify({ query, sessionId: opts?.sessionId, messageType: opts?.messageType, fastMode: opts?.fastMode }),
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -37,7 +39,7 @@ async function callPythonServer(query: string, opts?: { sessionId?: string; mess
   }
 }
 
-async function runPython(query: string, opts?: { sessionId?: string; messageType?: string }): Promise<{ stdout: string; stderr: string; code: number | null }> {
+async function runPython(query: string, opts?: PlanOpts): Promise<{ stdout: string; stderr: string; code: number | null }> {
   const projectRoot = path.resolve(process.cwd(), ".."); // routewise-ai dir
   const args = ["-m", "src.main", query, "--no-save", ...(opts?.sessionId ? ["--session-id", opts.sessionId] : []), ...(opts?.messageType ? ["--message-type", opts.messageType] : [])];
 
@@ -61,7 +63,8 @@ async function runPython(query: string, opts?: { sessionId?: string; messageType
     chosen = ["python", args];
   }
 
-  // Conservative overrides to keep responses snappy in dev
+  // Conservative overrides; use UI-provided fastMode when available
+  const fast = opts?.fastMode ?? true; // default true in dev
   const childEnv: NodeJS.ProcessEnv = {
     ...process.env,
     ROUTEWISE_MODE: "mcp",
@@ -69,7 +72,7 @@ async function runPython(query: string, opts?: { sessionId?: string; messageType
     REQUEST_TIMEOUT: process.env.REQUEST_TIMEOUT || "12",
     PYTHONIOENCODING: "utf-8",
     PYTHONUNBUFFERED: "1",
-    FAST_MODE: "1",
+    FAST_MODE: fast ? "1" : "0",
     SEARCH_PROVIDER: process.env.SEARCH_PROVIDER || "duckduckgo",
   };
 
@@ -132,6 +135,8 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const query = (body?.query ?? "").toString().trim();
     const sessionId = (body?.sessionId ?? "").toString().trim();
+    const fastMode = typeof body?.fastMode === "boolean" ? (body.fastMode as boolean) : true; // default ON
+    const clientMessageType = (body?.messageType ?? "").toString().trim();
     if (!query) return NextResponse.json({ error: "Missing 'query'" }, { status: 400 });
 
     // Quick path for greetings or trivial inputs to avoid long planner runs
@@ -143,10 +148,12 @@ export async function POST(req: Request) {
 
     // Choose message type heuristically for now; frontend may pass an explicit intent later
     const isRefine = /refine|adjust|change|reduce|increase|why|add|remove|swap/i.test(query);
-    const messageType = isRefine ? "refinement" : "text";
+    const messageType = (clientMessageType === "refinement" || clientMessageType === "text")
+      ? clientMessageType
+      : (isRefine ? "refinement" : "text");
 
     // 1) Try persistent Python backend first
-    const pythonServer = await callPythonServer(query, { sessionId, messageType });
+    const pythonServer = await callPythonServer(query, { sessionId, messageType, fastMode });
     if (pythonServer.ok && pythonServer.markdown) {
       return NextResponse.json({ markdown: pythonServer.markdown });
     }
@@ -159,7 +166,7 @@ export async function POST(req: Request) {
     }
 
     // 2) Fallback to spawning the CLI once to keep current behavior working
-    const { stdout, stderr, code } = await runPython(query, { sessionId, messageType });
+    const { stdout, stderr, code } = await runPython(query, { sessionId, messageType, fastMode });
 
     if (code === 0) {
       const marker = "=== Final Itinerary (Markdown) ===";

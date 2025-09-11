@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { IoFlashOutline, IoFlashOffOutline } from "react-icons/io5";
 
 type Message = { id: string; role: "user" | "assistant"; content: string; createdAt: number };
 
@@ -24,6 +25,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fastMode, setFastMode] = useState<boolean>(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Load from localStorage only on client after mount
@@ -33,6 +35,9 @@ export default function ChatPage() {
       const saved = raw ? (JSON.parse(raw) as Chat[]) : [];
       setChats(saved);
       setActiveId(saved[0]?.id ?? uid());
+
+      const fmRaw = localStorage.getItem("rw:fastMode");
+      if (fmRaw != null) setFastMode(fmRaw === "1");
     } catch {}
     setMounted(true);
   }, []);
@@ -44,6 +49,7 @@ export default function ChatPage() {
 
   useEffect(() => { if (mounted) localStorage.setItem("rw:chats", JSON.stringify(chats)); }, [chats, mounted]);
   useEffect(() => { if (mounted) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [activeChat.messages.length, loading, mounted]);
+  useEffect(() => { if (mounted) localStorage.setItem("rw:fastMode", fastMode ? "1" : "0"); }, [fastMode, mounted]);
 
   function ensureActiveChat() {
     if (!activeId) return; // wait until mount sets an id
@@ -76,7 +82,10 @@ export default function ChatPage() {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 1000 * 120); // 2 min safety timeout
-      const res = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q, sessionId: targetId }), signal: controller.signal });
+      // Decide message type based on whether we already have any assistant replies in this chat
+      const hasAssistantReply = (activeChat?.messages || []).some((m) => m.role === "assistant");
+      const messageType = hasAssistantReply ? "refinement" : "text";
+      const res = await fetch("/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query: q, sessionId: targetId, fastMode, messageType }), signal: controller.signal });
       clearTimeout(timeout);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error((data as any)?.error || "Request failed");
@@ -204,6 +213,15 @@ export default function ChatPage() {
               onChange={(e) => setInput(e.target.value)}
               placeholder="Describe your trip… (destination, days, budget, interests)"
             />
+            <button
+              type="button"
+              className={`chip flex items-center gap-1 ${fastMode ? "bg-yellow-50 border-yellow-200 text-yellow-700 hover:bg-yellow-100" : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"}`}
+              title={fastMode ? "Fast mode ON: quicker but lighter results" : "Fast mode OFF: deeper, more thorough planning"}
+              onClick={() => setFastMode((v) => !v)}
+            >
+              {fastMode ? <IoFlashOutline className="inline-block" /> : <IoFlashOffOutline className="inline-block" />}
+              <span className="hidden sm:inline">Fast</span>
+            </button>
             <button type="submit" className="btn" disabled={loading || !input.trim()}>
               {loading ? "Planning…" : "Send"}
             </button>
